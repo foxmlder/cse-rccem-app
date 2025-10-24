@@ -1,0 +1,204 @@
+// Schéma de base de données pour l'application CSE RCCEM-Montataire
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Utilisateurs et membres du CSE
+model User {
+  id                String              @id @default(cuid())
+  email             String              @unique
+  name              String
+  password          String
+  role              UserRole            @default(MEMBER)
+  cseRole           String?             // Ex: "Président", "Secrétaire", "Trésorier", "Titulaire", "Suppléant"
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Relations
+  createdMeetings   Meeting[]           @relation("CreatedBy")
+  participations    MeetingParticipant[]
+  submittedFeedbacks Feedback[]
+  createdMinutes    MeetingMinute[]     @relation("MinuteCreatedBy")
+  signatures        Signature[]
+
+  @@index([email])
+}
+
+enum UserRole {
+  ADMIN
+  PRESIDENT
+  MEMBER
+}
+
+// Réunions
+model Meeting {
+  id                String              @id @default(cuid())
+  date              DateTime
+  time              String              // Format "HH:MM"
+  type              MeetingType
+  status            MeetingStatus       @default(PLANNED)
+  location          String?
+  convocationSentAt DateTime?
+  feedbackDeadline  DateTime?           // Date limite pour les remontées
+  createdById       String
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  // Relations
+  createdBy         User                @relation("CreatedBy", fields: [createdById], references: [id])
+  participants      MeetingParticipant[]
+  agendaItems       AgendaItem[]
+  feedbacks         Feedback[]
+  minutes           MeetingMinute[]
+
+  @@index([date])
+  @@index([status])
+}
+
+enum MeetingType {
+  ORDINARY        // Réunion ordinaire
+  EXTRAORDINARY   // Réunion extraordinaire
+}
+
+enum MeetingStatus {
+  PLANNED         // Planifiée
+  CONVOCATION_SENT // Convocation envoyée
+  IN_PROGRESS     // En cours
+  COMPLETED       // Terminée
+  CANCELLED       // Annulée
+}
+
+// Participants aux réunions
+model MeetingParticipant {
+  id          String   @id @default(cuid())
+  meetingId   String
+  userId      String
+  status      ParticipantStatus @default(INVITED)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, userId])
+  @@index([meetingId])
+  @@index([userId])
+}
+
+enum ParticipantStatus {
+  INVITED
+  CONFIRMED
+  PRESENT
+  ABSENT
+  EXCUSED
+}
+
+// Points à l'ordre du jour
+model AgendaItem {
+  id          String   @id @default(cuid())
+  meetingId   String
+  order       Int
+  title       String
+  description String?  @db.Text
+  duration    Int?     // Durée estimée en minutes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  meeting     Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId])
+  @@index([order])
+}
+
+// Remontées du personnel
+model Feedback {
+  id          String          @id @default(cuid())
+  meetingId   String
+  submittedById String
+  subject     String
+  description String          @db.Text
+  category    FeedbackCategory
+  status      FeedbackStatus  @default(PENDING)
+  response    String?         @db.Text
+  submittedAt DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relations
+  meeting     Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  submittedBy User            @relation(fields: [submittedById], references: [id])
+
+  @@index([meetingId])
+  @@index([submittedById])
+  @@index([status])
+}
+
+enum FeedbackCategory {
+  WORKING_CONDITIONS    // Conditions de travail
+  WORK_ORGANIZATION     // Organisation du travail
+  HEALTH_SAFETY         // Santé et sécurité
+  TRAINING              // Formation
+  WAGES_BENEFITS        // Salaires et avantages
+  OTHER                 // Autre
+}
+
+enum FeedbackStatus {
+  PENDING      // En attente
+  IN_PROGRESS  // En cours de traitement
+  ADDRESSED    // Traité
+  REJECTED     // Rejeté
+}
+
+// Comptes-rendus
+model MeetingMinute {
+  id              String          @id @default(cuid())
+  meetingId       String          @unique
+  content         String          @db.Text
+  status          MinuteStatus    @default(DRAFT)
+  pdfUrl          String?
+  sentAt          DateTime?
+  createdById     String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  meeting         Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  createdBy       User            @relation("MinuteCreatedBy", fields: [createdById], references: [id])
+  signatures      Signature[]
+
+  @@index([meetingId])
+  @@index([status])
+}
+
+enum MinuteStatus {
+  DRAFT           // Brouillon
+  PENDING_SIGNATURE // En attente de signatures
+  SIGNED          // Signé
+  PUBLISHED       // Publié
+}
+
+// Signatures électroniques
+model Signature {
+  id              String          @id @default(cuid())
+  minuteId        String
+  userId          String
+  signatureData   String          @db.Text  // Données base64 de la signature
+  signedAt        DateTime        @default(now())
+  ipAddress       String?
+  userAgent       String?
+
+  // Relations
+  minute          MeetingMinute   @relation(fields: [minuteId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id])
+
+  @@unique([minuteId, userId])
+  @@index([minuteId])
+  @@index([userId])
+}
